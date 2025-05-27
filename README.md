@@ -1,2 +1,122 @@
-# Stock-Market-Dashboard
-A Python-based dashboard for real-time stock prices and news sentiment analysis using Google Colab
+# Install dependencies
+!pip install dash yfinance requests beautifulsoup4 textblob plotly pyngrok
+
+import yfinance as yf
+import requests
+from bs4 import BeautifulSoup
+from textblob import TextBlob
+import dash
+from dash import dcc, html
+from dash.dependencies import Input, Output
+import plotly.graph_objects as go
+from pyngrok import ngrok
+
+def fetch_stock_data(ticker):
+    """Fetch historical stock data using yfinance."""
+    try:
+        stock = yf.Ticker(ticker)
+        # Fetch historical data for the last day (since market is closed)
+        data = stock.history(period="1d", interval="1m")
+        if not data.empty:
+            last_price = data['Close'].iloc[-1]
+            last_timestamp = data.index[-1]
+            print(f"Data fetched for {ticker}: Price={last_price}, Timestamp={last_timestamp}")
+            return last_price, last_timestamp
+        else:
+            print(f"No data available for {ticker}.")
+            return None, None
+    except Exception as e:
+        print(f"Error fetching stock data for {ticker}: {str(e)}")
+        return None, None
+
+def scrape_news(ticker):
+    """Scrape news headlines from Yahoo Finance."""
+    url = f"https://finance.yahoo.com/quote/{ticker}/news"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        headlines = [h.get_text() for h in soup.find_all('h3', class_='Mb(5px)')]
+        print(f"Headlines for {ticker}: {headlines[:3]}")
+        return headlines[:3] if headlines else ["No headlines found"]
+    except Exception as e:
+        print(f"Error scraping news for {ticker}: {str(e)}")
+        return [f"Error scraping news: {str(e)}"]
+
+def analyze_sentiment(headlines):
+    """Analyze sentiment of news headlines using TextBlob."""
+    try:
+        sentiments = []
+        for headline in headlines:
+            if headline.startswith("Error"):
+                continue
+            blob = TextBlob(headline)
+            sentiment = blob.sentiment.polarity
+            sentiments.append(sentiment)
+        avg_sentiment = sum(sentiments) / len(sentiments) if sentiments else 0
+        print(f"Sentiment scores: {sentiments}, Average: {avg_sentiment}")
+        return avg_sentiment
+    except Exception as e:
+        print(f"Error analyzing sentiment: {str(e)}")
+        return 0
+
+# Initialize Dash app
+app = dash.Dash(__name__)
+
+app.layout = html.Div([
+    html.H1("Real-Time Stock Analysis Dashboard", style={'textAlign': 'center', 'color': '#333'}),
+    dcc.Input(id='ticker-input', value='AAPL', type='text', placeholder='Enter stock ticker (e.g., AAPL)', 
+              style={'width': '200px', 'margin': '10px'}),
+    html.Button('Submit', id='submit-button', n_clicks=0, 
+                style={'padding': '5px 10px'}),
+    dcc.Graph(id='stock-price-graph'),
+    html.Div(id='sentiment-output', style={'margin': '20px'}),
+    dcc.Interval(id='interval-component', interval=60*1000, n_intervals=0)
+])
+
+@app.callback(
+    [Output('stock-price-graph', 'figure'), Output('sentiment-output', 'children')],
+    [Input('submit-button', 'n_clicks'), Input('interval-component', 'n_intervals')],
+    [dash.dependencies.State('ticker-input', 'value')]
+)
+def update_dashboard(n_clicks, n_intervals, ticker):
+    """Update stock price graph and sentiment analysis."""
+    ticker = ticker.upper()
+    price, timestamp = fetch_stock_data(ticker)
+    
+    if price is None:
+        return go.Figure(), f"No data available for {ticker}. Please check the ticker or try again later."
+    
+    headlines = scrape_news(ticker)
+    sentiment_score = analyze_sentiment(headlines)
+    sentiment_text = (f"News Sentiment Score: {sentiment_score:.2f} "
+                     f"({'Positive' if sentiment_score > 0 else 'Negative' if sentiment_score < 0 else 'Neutral'})")
+    
+    # Create scatter plot for the price
+    figure = go.Figure()
+    figure.add_trace(go.Scatter(
+        x=[timestamp],
+        y=[price],
+        mode='lines+markers',
+        name=f'{ticker} Price',
+        line=dict(color='#1f77b4')
+    ))
+    figure.update_layout(
+        title=f'{ticker} Stock Price (Last Updated: {timestamp.strftime("%Y-%m-%d %H:%M:%S")})',
+        xaxis_title='Time',
+        yaxis_title='Price (USD)',
+        plot_bgcolor='#f9f9f9',
+        paper_bgcolor='#f9f9f9'
+    )
+    
+    print(f"Figure created: {figure}")
+    return figure, sentiment_text
+
+# Set up ngrok for public URL
+ngrok.set_auth_token("YOUR AUTH TOKEN")
+public_url = ngrok.connect(8050)
+print(f"Dashboard running at: {public_url}")
+
+# Run the Dash app
+app.run(debug=False, port=8050, mode='external')
