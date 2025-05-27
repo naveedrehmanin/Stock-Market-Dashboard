@@ -225,7 +225,7 @@ def update_dashboard(n_clicks, n_intervals, ticker):
     return figure, sentiment_text
 
 # Set up ngrok for public URL
-ngrok.set_auth_token("2xg73Pf4UgbjI2sGKgw0AUpmhCZ_vbenFxdtjBsbhrEhnvxZ")
+ngrok.set_auth_token("YOUR AUTH TOKEN")
 public_url = ngrok.connect(8050)
 print(f"Dashboard running at: {public_url}")
 
